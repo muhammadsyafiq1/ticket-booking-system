@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Test WebSocket Notification</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body>
+  <h2>Test Notifikasi Real-Time</h2>
+  <p>User ID: <input type="number" id="userId" value="1"></p>
+  <button onclick="connect()">Connect</button>
+  <div id="log" style="margin-top: 20px; font-family: monospace;"></div>
+
+  <script>
+    function connect() {
+      const userId = document.getElementById('userId').value;
+      const socket = io('http://localhost:5004');
+
+      socket.on('connect', () => {
+        log(`Connected as socket ${socket.id}`);
+        socket.emit('register', Number(userId));
+      });
+
+      socket.on('notification', (data) => {
+        log(`NOTIFIKASI: ${data.message}`);
+      });
+
+      function log(text) {
+        document.getElementById('log').innerHTML += `<div>${new Date().toLocaleTimeString()} — ${text}</div>`;
+      }
+    }
+  </script>
+</body>
+</html>

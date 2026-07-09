@@ -1,0 +1,52 @@
+name: API Gateway CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "api-gateway/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "api-gateway/**"
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install dependencies
+        working-directory: ./api-gateway
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript
+        working-directory: ./api-gateway
+        run: pnpm build
+
+      - name: Build Docker image
+        working-directory: ./api-gateway
+        run: docker build -t ticket-booking-api-gateway:${{ github.sha }} .
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push Docker image
+        run: |
+          docker tag ticket-booking-api-gateway:${{ github.sha }} ${{ secrets.DOCKERHUB_USERNAME }}/ticket-booking-api-gateway:latest
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/ticket-booking-api-gateway:latest

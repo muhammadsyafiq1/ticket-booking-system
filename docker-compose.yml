@@ -1,0 +1,232 @@
+services:
+  # ─── Infrastruktur ────────────────────────────────────────────────
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+      MYSQL_DATABASE: ticket_booking_db
+    ports:
+      - "3308:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:alpine
+    command: redis-server --notify-keyspace-events Ex
+    ports:
+      - "6380:6379"
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5673:5672"
+      - "15673:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── User Service ─────────────────────────────────────────────────
+  user-service:
+    build: ./user-service
+    ports:
+      - "5003:5003"
+    environment:
+      - PORT=5003
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=root
+      - DB_PASSWORD=
+      - DB_NAME=ticket_booking_db
+      - JWT_SECRET=ticket_booking_secret_key_2026
+      - JWT_EXPIRES_IN=24h
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - USER_CREATE_QUEUE=user_create_queue
+      - USER_CREATED_QUEUE=user_created_queue
+      - BOOKING_NOTIFICATION_QUEUE=booking_notification_queue
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: on-failure
+
+  # ─── User Worker ──────────────────────────────────────────────────
+  user-worker:
+    build: ./user-service
+    command: pnpm start:worker
+    environment:
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=root
+      - DB_PASSWORD=
+      - DB_NAME=ticket_booking_db
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - USER_CREATE_QUEUE=user_create_queue
+      - USER_CREATED_QUEUE=user_created_queue
+      - BOOKING_NOTIFICATION_QUEUE=booking_notification_queue
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: on-failure
+
+  # ─── Booking Service ──────────────────────────────────────────────
+  booking-service:
+    build: ./booking-service
+    ports:
+      - "5001:5001"
+    environment:
+      - PORT=5001
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=root
+      - DB_PASSWORD=
+      - DB_NAME=ticket_booking_db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - JWT_SECRET=ticket_booking_secret_key_2026
+      - LOCK_TTL_SECONDS=600
+      - BOOKING_CREATE_QUEUE=booking_create_queue
+      - BOOKING_EXPIRED_QUEUE=booking_expired_queue
+      - BOOKING_NOTIFICATION_QUEUE=booking_notification_queue
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: on-failure
+
+  # ─── Booking Worker ───────────────────────────────────────────────
+  booking-worker:
+    build: ./booking-service
+    command: pnpm start:worker
+    environment:
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=root
+      - DB_PASSWORD=
+      - DB_NAME=ticket_booking_db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - BOOKING_CREATE_QUEUE=booking_create_queue
+      - BOOKING_EXPIRED_QUEUE=booking_expired_queue
+      - BOOKING_NOTIFICATION_QUEUE=booking_notification_queue
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: on-failure
+
+  # ─── Expiry Worker ────────────────────────────────────────────────
+  expiry-worker:
+    build: ./booking-service
+    command: pnpm start:expiry
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - BOOKING_EXPIRED_QUEUE=booking_expired_queue
+      - BOOKING_NOTIFICATION_QUEUE=booking_notification_queue
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: on-failure
+
+  # ─── Payment Service ──────────────────────────────────────────────
+  payment-service:
+    build: ./payment-service
+    ports:
+      - "5002:5002"
+    environment:
+      - PORT=5002
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=root
+      - DB_PASSWORD=
+      - DB_NAME=ticket_booking_db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - JWT_SECRET=ticket_booking_secret_key_2026
+      - PAYMENT_PROCESS_QUEUE=payment_process_queue
+      - BOOKING_NOTIFICATION_QUEUE=booking_notification_queue
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: on-failure
+
+  # ─── Payment Worker ───────────────────────────────────────────────
+  payment-worker:
+    build: ./payment-service
+    command: pnpm start:worker
+    environment:
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=root
+      - DB_PASSWORD=
+      - DB_NAME=ticket_booking_db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - PAYMENT_PROCESS_QUEUE=payment_process_queue
+      - BOOKING_NOTIFICATION_QUEUE=booking_notification_queue
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: on-failure
+
+  # ─── Notification Service ─────────────────────────────────────────
+  notification-service:
+    build: ./notification-service
+    ports:
+      - "5004:5004"
+    environment:
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - BOOKING_NOTIFICATION_QUEUE=booking_notification_queue
+      - USER_CREATED_QUEUE=user_created_queue
+      - SOCKET_PORT=5004
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: on-failure
+
+  # ─── API Gateway ──────────────────────────────────────────────────
+  api-gateway:
+    build: ./api-gateway
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
+      - USER_SERVICE_URL=http://user-service:5003
+      - BOOKING_SERVICE_URL=http://booking-service:5001
+      - PAYMENT_SERVICE_URL=http://payment-service:5002
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - user-service
+      - booking-service
+      - payment-service
+      - redis
+    restart: on-failure
+
+volumes:
+  mysql_data:
